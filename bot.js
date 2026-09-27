@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
@@ -84,6 +85,65 @@ function loadAccounts() {
   }
 
   return accounts;
+}
+
+function syncTo9Router(accessToken, email) {
+  return new Promise((resolve) => {
+    const loginPayload = JSON.stringify({ password: process.env.ROUTER_PASSWORD || 'maduTJ150' });
+    const req = http.request(
+      {
+        hostname: process.env.ROUTER_HOST || '127.0.0.1',
+        port: process.env.ROUTER_PORT || 20128,
+        path: '/api/auth/login',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(loginPayload),
+        },
+      },
+      (res) => {
+        const setCookies = res.headers['set-cookie'];
+        let cookie = '';
+        if (setCookies) cookie = setCookies.map((c) => c.split(';')[0]).join('; ');
+        res.resume();
+        res.on('end', () => {
+          if (!cookie) return resolve(false);
+          const importPayload = JSON.stringify({ accessToken, name: email });
+          const impReq = http.request(
+            {
+              hostname: process.env.ROUTER_HOST || '127.0.0.1',
+              port: process.env.ROUTER_PORT || 20128,
+              path: '/api/oauth/codex/import-token',
+              method: 'POST',
+              headers: {
+                Cookie: cookie,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(importPayload),
+              },
+            },
+            (impRes) => {
+              let body = '';
+              impRes.on('data', (d) => (body += d));
+              impRes.on('end', () => {
+                try {
+                  const parsed = JSON.parse(body);
+                  resolve(parsed.success === true);
+                } catch (e) {
+                  resolve(false);
+                }
+              });
+            }
+          );
+          impReq.on('error', () => resolve(false));
+          impReq.write(importPayload);
+          impReq.end();
+        });
+      }
+    );
+    req.on('error', () => resolve(false));
+    req.write(loginPayload);
+    req.end();
+  });
 }
 
 function removeAccountFromList(rawLine) {
@@ -326,6 +386,14 @@ async function processAccount(browser, account, index, total) {
 
     // 8. Bersihkan akun dari akun.txt (Idempotent)
     removeAccountFromList(raw);
+
+    // 9. Auto-sync ke 9Router (jika aktif)
+    if (process.env.AUTO_SYNC !== 'false' && accessToken && accessToken.startsWith('eyJ')) {
+      const synced = await syncTo9Router(accessToken, email);
+      if (synced) {
+        console.log(`    ${c.green}⚡ [9Router] Akun otomatis didaftarkan ke 9Router (cx / Codex)!${c.reset}`);
+      }
+    }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`  ${c.green}✓ SUKSES! [${elapsed}s] Token sesi berhasil disimpan.${c.reset}`);

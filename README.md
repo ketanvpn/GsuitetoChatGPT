@@ -2,13 +2,14 @@
 
 # ⚡ Gsuite to ChatGPT (OpenAI)
 
-**Automated Bulk Google Workspace Onboarding & Token Harvester for ChatGPT**
+**Automated Bulk Google Workspace Onboarding, Token Harvester & 9Router Sync**
 
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Puppeteer Stealth](https://img.shields.io/badge/Puppeteer-Stealth%20Mode-40B5A4?style=for-the-badge&logo=puppeteer&logoColor=white)](https://pptr.dev/)
-[![OpenAI](https://img.shields.io/badge/OpenAI-ChatGPT-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20VPS%20%7C%20Windows%20%7C%20macOS-orange?style=for-the-badge)]()
-[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![9Router](https://img.shields.io/badge/9Router-Integrated-6366F1?style=for-the-badge)](https://9router.ketantech.my.id)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+
+*Automate onboarding for bulk Google Workspace (GSuite) accounts into ChatGPT / OpenAI without CAPTCHA, harvest authentic session tokens, and automatically sync them directly to your 9Router AI Gateway.*
 
 </div>
 
@@ -16,12 +17,12 @@
 
 ## 📌 Ringkasan Proyek
 
-**Gsuite to ChatGPT** adalah alat automasi cerdas berbasis **Headless Browser Stealth** untuk mendaftarkan dan memanen sesi akun Google / GSuite Workspace secara massal ke platform resmi **OpenAI ChatGPT (`chatgpt.com`)**.
+**Gsuite to ChatGPT** adalah alat automasi cerdas berbasis **Headless Browser Stealth** untuk mendaftarkan dan memanen sesi akun Google / GSuite Workspace secara massal ke platform resmi **OpenAI ChatGPT (`chatgpt.com`)**, lengkap dengan sinkronisasi langsung ke [9Router AI Gateway](https://9router.ketantech.my.id).
 
 Alat ini mengekstrak **Session Token (`__Secure-next-auth.session-token`)** dan **Access Token** resmi dari sesi web ChatGPT untuk dihubungkan ke:
-- **9Router AI Gateway**
-- **OpenAI Codex CLI**
-- **Gateway Multi-Akun (chatgpt2api / chat2api)**
+- **9Router AI Gateway** (Provider OpenAI Codex `cx`)
+- **Browser Laptop / HP** tanpa perlu login ulang manual (via Cookie-Editor)
+- **Gateway Multi-Akun (Aurora / chatgpt2api)**
 - Kebutuhan rotasi akun AI tanpa limit.
 
 ---
@@ -60,7 +61,11 @@ Mendaftar akun ChatGPT baru dari VPS Linux menggunakan email biasa hampir selalu
 [Ekstraksi Token Sesi & Kredensial]
          │
          ├──► chatgpt_tokens.txt  (Format ringkas: email|accessToken|sessionToken|expires)
-         └──► tokens/{email}.json (Objek terstruktur: cookies, user data, metadata)
+         ├──► tokens/{email}.json (Objek terstruktur: cookies, user data, metadata)
+         │
+         ▼ (Auto-Sync ke 9Router API)
+[9Router AI Gateway (https://9router.ketantech.my.id)]
+         └──► Provider: OpenAI Codex (cx)
 ```
 
 ---
@@ -68,6 +73,8 @@ Mendaftar akun ChatGPT baru dari VPS Linux menggunakan email biasa hampir selalu
 ## ✨ Fitur Unggulan
 
 - 🥷 **Puppeteer Stealth Plugin:** Menyamarkan sidik jari otomasi browser (`navigator.webdriver`, canvas, audio, plugins) agar tidak terdeteksi oleh Cloudflare dan Google.
+- ⚡ **Auto-Sync ke 9Router:** Setiap akun yang berhasil dipanen otomatis didaftarkan ke [9Router](https://9router.ketantech.my.id) (Provider: `codex` / `cx`).
+- 🔄 **Sinkronisasi Massal Mandiri:** Tersedia perintah `npm run sync` untuk mengimpor seluruh token yang tersimpan di folder `tokens/` ke 9Router kapan saja.
 - ⌨️ **Simulasi Ketikan Manusiawi (*Human-like Typing*):** Kecepatan ketikan dinamis dan acak (30ms – 75ms) untuk mencegah kecurigaan sistem keamanan input.
 - 🎓 **Bypass Otomatis Layar Onboarding GSuite:** Mendeteksi dan mengklik tombol *"I understand"*, *"Saya mengerti"*, dan konfirmasi OAuth otomatis.
 - 🎂 **Penanganan Form Onboarding OpenAI:** Otomatis mendeteksi formulir umur di `auth.openai.com/about-you` dan mengisikan usia realistis secara acak.
@@ -76,11 +83,21 @@ Mendaftar akun ChatGPT baru dari VPS Linux menggunakan email biasa hampir selalu
 
 ---
 
-## 📦 Persyaratan Sistem
+## 📂 Struktur Proyek
 
-- **Sistem Operasi:** Linux (Ubuntu 22.04+ / Debian 11+ direkomendasikan), Windows, atau macOS.
-- **Node.js:** Versi 18.0.0 atau lebih baru.
-- **Dependensi Chrome:** Terpasang pustaka sistem pendukung Chromium di Linux.
+```text
+GsuitetoChatGPT/
+├── bot.js             # Mesin utama otomasi browser Puppeteer & ekstraksi token
+├── sync-9router.js    # Skrip sinkronisasi akun hasil panen ke database 9Router
+├── run.sh             # Skrip peluncur cepat (runner)
+├── setup.sh           # Installer dependensi sistem Linux & Chromium
+├── akun.example.txt   # Contoh format daftar akun input
+├── akun.txt           # File input akun Anda (diabaikan oleh git)
+├── chatgpt_tokens.txt # Ringkasan token hasil panen (diabaikan oleh git)
+├── tokens/            # Folder berkas JSON detail tiap akun (diabaikan oleh git)
+├── package.json       # Metadata & dependensi Node.js
+└── README.md          # Dokumentasi panduan penggunaan
+```
 
 ---
 
@@ -97,7 +114,6 @@ cd GsuitetoChatGPT
 chmod +x setup.sh run.sh
 ./setup.sh
 ```
-*Skrip akan memeriksa Node.js, memasang dependensi `puppeteer` & `stealth plugin`, serta membuat berkas `akun.txt`.*
 
 ### 3. Masukkan Daftar Akun GSuite
 Edit berkas `akun.txt`:
@@ -115,57 +131,60 @@ gadang3@paragadis.com:password123
 ### 4. Mulai Pemanenan (Harvester)
 ```bash
 ./run.sh
+# Atau menggunakan npm:
+npm start
 ```
-*Bot akan membuka browser headless, melakukan login Google SSO, menyelesaikan onboarding OpenAI, dan mengekstrak token sesi.*
+*Bot akan membuka browser headless, login ke ChatGPT via Google SSO, menyelesaikan onboarding OpenAI, mengekstrak token sesi, dan otomatis menyinkronkan ke 9Router.*
 
 ---
 
-## 📁 Struktur Berkas Hasil (Output)
+## 💡 Bagaimana Cara Memakai Token Hasil Panen?
 
-Setelah proses selesai, hasil pemanenan tersimpan di dua tempat:
+Setelah pemanenan selesai, token Anda tersimpan di folder `tokens/` (format JSON) dan `chatgpt_tokens.txt`. Terdapat **3 cara praktis** untuk menggunakannya:
 
-### 1. Ringkasan Cepat: `chatgpt_tokens.txt`
-Format baris tunggal berpembatas pipa (`|`):
-```text
-email|accessToken|sessionToken|expireTime
+### 1. Masuk Otomatis ke 9Router (Paling Direkomendasikan)
+Secara bawaan, bot otomatis mendaftarkan akun yang berhasil ke 9Router lokal (`http://127.0.0.1:20128`).
+Jika Anda ingin menyinkronkan ulang seluruh token yang ada di folder `tokens/` ke 9Router kapan saja:
+```bash
+npm run sync
 ```
-*Cocok untuk skrip import cepat atau CLI tools.*
+*Hasilnya:* Akun akan muncul aktif di dashboard [9Router](https://9router.ketantech.my.id) pada menu **OpenAI Codex (`cx`)**.
 
-### 2. Detail Terstruktur: `tokens/{email}.json`
-Setiap akun menghasilkan berkas JSON lengkap:
-```json
-{
-  "email": "user@domain.com",
-  "name": "Nama Pengguna",
-  "accessToken": "eyJhbGciOi...",
-  "sessionToken": "eyJhbGciOi...",
-  "expires": "2026-10-27T10:00:00.000Z",
-  "harvestedAt": "2026-09-27T10:05:00.000Z",
-  "cookies": [ ... ],
-  "user": {
-    "id": "user-...",
-    "name": "...",
-    "email": "..."
-  }
-}
-```
+### 2. Menggunakan Token di Browser Tanpa Login Ulang
+Jika Anda ingin membuka ChatGPT Web di komputer/laptop pribadi menggunakan akun hasil panen tanpa perlu mengetik email/password:
+1. Buka file `tokens/email_anda.json` atau baris di `chatgpt_tokens.txt`.
+2. Salin nilai `sessionToken` (dimulai dengan `eyJ...`).
+3. Buka browser di laptop/PC Anda, pasang ekstensi **Cookie-Editor**.
+4. Buka `https://chatgpt.com`, buka Cookie-Editor, tambahkan cookie baru:
+   - **Name:** `__Secure-next-auth.session-token`
+   - **Value:** *paste nilai sessionToken*
+   - Centang **Secure** dan **HttpOnly**.
+5. Refresh browser — Anda langsung berada di dalam dashboard akun ChatGPT tersebut!
+
+### 3. Menghubungkan ke Gateway Web-to-API (Aurora / chatgpt2api)
+Jika ingin memutar puluhan token sesi web menjadi endpoint OpenAI-compatible standar (`/v1/chat/completions`):
+- Anda dapat menyalurkan `sessionToken` ke adapter container Docker (seperti Aurora / chatgpt2api).
+- *Catatan:* Untuk trafik intensif web conversation dari IP datacenter VPS, disarankan menggunakan Residential Proxy pada adapter agar terhindar dari deteksi *"Unusual activity"*.
 
 ---
 
-## 🔌 Integrasi ke Gateway / Tool Coding
+## ⚙️ Variabel Lingkungan (Opsional)
 
-### 1. Integrasi dengan Gateway Multi-Akun (chatgpt2api)
-Salin nilai `sessionToken` ke dalam daftar session token gateway Anda. Gateway akan memutar akun secara berkala sehingga kuota tidak pernah habis.
+Anda dapat mengonfigurasi variabel berikut (atau membuat berkas `.env`):
 
-### 2. Integrasi dengan OpenAI Codex CLI
-Gunakan nilai `accessToken` atau set cookie sesi ke environment konfigurasi Codex untuk menikmati model reasoning dan coding tanpa batas.
+| Variabel | Bawaan | Deskripsi |
+| :--- | :--- | :--- |
+| `ROUTER_HOST` | `127.0.0.1` | Host instance 9Router |
+| `ROUTER_PORT` | `20128` | Port instance 9Router |
+| `ROUTER_PASSWORD` | `maduTJ150` | Password admin 9Router untuk injeksi API |
+| `AUTO_SYNC` | `true` | Otomatis mendaftarkan akun ke 9Router saat panen |
 
 ---
 
 ## 🛡️ Keamanan & Privasi
 
 - Berkas `.gitignore` telah dikonfigurasi untuk **TIDAK MENGIRIM** berkas privat seperti `akun.txt`, `chatgpt_tokens.txt`, `tokens/`, dan `screenshots/` ke repositori publik.
-- Selalu pastikan Anda tidak menambahkan kredensial pribadi ke dalam komit Git.
+- Ekstraksi token berjalan lokal 100% di server/mesin Anda tanpa perantara server pihak ketiga.
 
 ---
 
