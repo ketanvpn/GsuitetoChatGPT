@@ -89,6 +89,7 @@ Mendaftar akun ChatGPT baru dari VPS Linux menggunakan email biasa hampir selalu
 ```text
 GsuitetoChatGPT/
 ├── bot.js                   # Mesin utama otomasi browser Puppeteer & ekstraksi token
+├── renew-tokens.js          # Auto-renew access token dari cookie sesi 90 hari (super cepat)
 ├── sync-9router.js          # Sinkronisasi token ke 9Router (Provider Codex cx)
 ├── sync-chatgpt2api.js      # Sinkronisasi token ke chat2api bridge
 ├── run.sh                   # Skrip peluncur cepat (runner)
@@ -143,6 +144,18 @@ gadang3@paragadis.com:password123
 npm start
 ```
 *Bot akan membuka browser headless, login ke ChatGPT via Google SSO, menyelesaikan onboarding OpenAI, mengekstrak token sesi, dan otomatis menyinkronkan ke 9Router.*
+
+### 5. Auto-Renew Token Berkala (Tanpa Login Ulang)
+Token sesi (cookie) bertahan selama **90 hari**. Setiap 5-7 hari, Anda cukup menjalankan skrip perpanjangan otomatis:
+```bash
+npm run renew
+```
+*Skrip ini akan memvalidasi cookie sesi semua akun, menarik Access Token baru dalam hitungan detik, dan langsung mengunggahnya ke chat2api & 9Router tanpa perlu memasukkan password atau melewati captcha kembali.*
+
+Untuk otomatisasi total, pasang cronjob per 5 hari:
+```bash
+(crontab -l 2>/dev/null; echo "0 3 */5 * * cd /root/projects/GsuitetoChatGPT && npm run renew >> /var/log/chatgpt-renew.log 2>&1") | crontab -
+```
 
 ---
 
@@ -210,15 +223,15 @@ Anda dapat mengonfigurasi variabel berikut (atau membuat berkas `.env`):
 
 ## 🔑 Tentang Token & Masa Berlaku
 
-Bot mengekstrak **3 jenis token** dari setiap akun:
+Arsitektur token pada ChatGPT Web & GSuite:
 
 | Token | Masa Berlaku | Auto-Renew | Kegunaan |
 | :--- | :--- | :--- | :--- |
-| **Refresh Token** | Sampai di-revoke | ✅ Ya (chat2api) | Upload ke chat2api → auto-renew setiap 5 hari |
-| Access Token (JWT) | 10 hari | ❌ | Fallback jika refresh token gagal |
-| Session Token (Cookie) | ~90 hari | ❌ | Login browser via Cookie-Editor |
+| **Session Token (Cookie)** | **~90 hari (3 bulan)** | ✅ Ya (`npm run renew`) | Memperpanjang Access Token secara instan tanpa login Google ulang |
+| **Access Token (JWT)** | **10 hari** | ✅ Ya (dari sesi) | Digunakan oleh chat2api & 9Router untuk inference API |
+| **Refresh Token (OAuth)** | Hingga di-revoke | Khusus Mobile App | Hanya dikeluarkan login native mobile app (bukan Web SSO GSuite) |
 
-**Prioritas upload ke chat2api:** Refresh Token → Access Token (fallback).
+> 💡 **Strategi Auto-Renew Praktis:** Anda hanya perlu panen awal sekali. Selama cookie sesi 90 hari tersimpan, jalankan `npm run renew` (atau pasang di crontab tiap 5 hari) untuk mendapatkan Access Token segar 10 hari secara berkala tanpa pernah menyentuh form login kembali.
 
 ---
 
