@@ -87,61 +87,39 @@ function loadAccounts() {
   return accounts;
 }
 
-function syncTo9Router(accessToken, email) {
+function syncToChatGPT2API(accessToken, email) {
   return new Promise((resolve) => {
-    const loginPayload = JSON.stringify({ password: process.env.ROUTER_PASSWORD || 'maduTJ150' });
+    const chat2apiHost = process.env.CHAT2API_HOST || '127.0.0.1';
+    const chat2apiPort = process.env.CHAT2API_PORT || 8085;
+    const chat2apiAuth = process.env.CHAT2API_AUTH || 'sk-chatgpt2api-ketan';
+    const postData = `text=${encodeURIComponent(accessToken)}`;
     const req = http.request(
       {
-        hostname: process.env.ROUTER_HOST || '127.0.0.1',
-        port: process.env.ROUTER_PORT || 20128,
-        path: '/api/auth/login',
+        hostname: chat2apiHost,
+        port: chat2apiPort,
+        path: '/tokens/upload',
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(loginPayload),
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Bearer ${chat2apiAuth}`,
+          'Content-Length': Buffer.byteLength(postData),
         },
       },
       (res) => {
-        const setCookies = res.headers['set-cookie'];
-        let cookie = '';
-        if (setCookies) cookie = setCookies.map((ck) => ck.split(';')[0]).join('; ');
-        res.resume();
+        let body = '';
+        res.on('data', (d) => (body += d));
         res.on('end', () => {
-          if (!cookie) return resolve(false);
-          const importPayload = JSON.stringify({ accessToken, name: email });
-          const impReq = http.request(
-            {
-              hostname: process.env.ROUTER_HOST || '127.0.0.1',
-              port: process.env.ROUTER_PORT || 20128,
-              path: '/api/oauth/codex/import-token',
-              method: 'POST',
-              headers: {
-                Cookie: cookie,
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(importPayload),
-              },
-            },
-            (impRes) => {
-              let body = '';
-              impRes.on('data', (d) => (body += d));
-              impRes.on('end', () => {
-                try {
-                  const parsed = JSON.parse(body);
-                  resolve(parsed.success === true);
-                } catch (e) {
-                  resolve(false);
-                }
-              });
-            }
-          );
-          impReq.on('error', () => resolve(false));
-          impReq.write(importPayload);
-          impReq.end();
+          try {
+            const parsed = JSON.parse(body);
+            resolve(parsed.status === 'success');
+          } catch (e) {
+            resolve(false);
+          }
         });
       }
     );
     req.on('error', () => resolve(false));
-    req.write(loginPayload);
+    req.write(postData);
     req.end();
   });
 }
@@ -462,11 +440,11 @@ async function processAccount(account, index, total) {
     // 6. Bersihkan akun dari akun.txt (Idempotent)
     removeAccountFromList(raw);
 
-    // 7. Auto-sync ke 9Router
+    // 7. Auto-sync ke chat2api (ChatGPT to API bridge → 9Router)
     if (process.env.AUTO_SYNC !== 'false' && accessToken && accessToken.startsWith('eyJ')) {
-      const synced = await syncTo9Router(accessToken, email);
+      const synced = await syncToChatGPT2API(accessToken, email);
       if (synced) {
-        console.log(`    ${c.green}⚡ [9Router] Akun otomatis didaftarkan ke 9Router (cx / Codex)!${c.reset}`);
+        console.log(`    ${c.green}⚡ [chat2api] Token otomatis di-upload ke chat2api → 9Router (chatgpt/)!${c.reset}`);
       }
     }
 

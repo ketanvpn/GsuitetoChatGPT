@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node bot.js",
     "harvest": "node bot.js",
-    "sync": "node sync-9router.js"
+    "sync": "node sync-chatgpt2api.js",
+    "sync-9router": "node sync-9router.js"
   },
   "keywords": [
     "chatgpt",
