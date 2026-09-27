@@ -87,12 +87,12 @@ function loadAccounts() {
   return accounts;
 }
 
-function syncToChatGPT2API(accessToken, email) {
+function syncToChatGPT2API(token, email, tokenType = 'access') {
   return new Promise((resolve) => {
     const chat2apiHost = process.env.CHAT2API_HOST || '127.0.0.1';
     const chat2apiPort = process.env.CHAT2API_PORT || 8085;
-    const chat2apiAuth = process.env.CHAT2API_AUTH || 'sk-chatgpt2api-ketan';
-    const postData = `text=${encodeURIComponent(accessToken)}`;
+    const chat2apiAuth = process.env.CHAT2API_AUTH || '«redacted:sk-…»';
+    const postData = `text=${encodeURIComponent(token)}`;
     const req = http.request(
       {
         hostname: chat2apiHost,
@@ -176,6 +176,24 @@ async function processAccount(account, index, total) {
   await page.setUserAgent(
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
   );
+
+  // --- Intercept OAuth responses to capture refresh_token ---
+  let capturedRefreshToken = null;
+  page.on('response', async (response) => {
+    try {
+      const url = response.url();
+      // Auth0 token exchange endpoint — returns { access_token, refresh_token, ... }
+      if (url.includes('auth0.openai.com/oauth/token') && response.status() === 200) {
+        const data = await response.json();
+        if (data.refresh_token) {
+          capturedRefreshToken = data.refresh_token;
+          console.log(`    ${c.magenta}🔑 [OAuth] Refresh token berhasil dicapture! (${data.refresh_token.length} chars)${c.reset}`);
+        }
+      }
+    } catch (e) {
+      // Silent — some responses can't be read
+    }
+  });
 
   try {
     // 1. Login ke Google Session Terlebih Dahulu (Two-step Rock Solid Auth)
@@ -421,7 +439,7 @@ async function processAccount(account, index, total) {
     const userName = (sessionData.user && sessionData.user.name) || 'User';
 
     // 5. Simpan Token
-    const tokenRecord = `${email}|${accessToken}|${sessionTokenParts}|${expires}\n`;
+    const tokenRecord = `${email}|${accessToken}|${sessionTokenParts}|${expires}|${capturedRefreshToken || 'N/A'}\n`;
     fs.appendFileSync(TOKENS_FILE, tokenRecord, 'utf-8');
 
     const jsonPath = path.join(TOKENS_DIR, `${email.replace(/[@.]/g, '_')}.json`);
@@ -429,6 +447,7 @@ async function processAccount(account, index, total) {
       email,
       name: userName,
       accessToken,
+      refreshToken: capturedRefreshToken || null,
       sessionToken: sessionTokenParts,
       expires,
       harvestedAt: new Date().toISOString(),
@@ -441,10 +460,20 @@ async function processAccount(account, index, total) {
     removeAccountFromList(raw);
 
     // 7. Auto-sync ke chat2api (ChatGPT to API bridge → 9Router)
-    if (process.env.AUTO_SYNC !== 'false' && accessToken && accessToken.startsWith('eyJ')) {
-      const synced = await syncToChatGPT2API(accessToken, email);
-      if (synced) {
-        console.log(`    ${c.green}⚡ [chat2api] Token otomatis di-upload ke chat2api → 9Router (chatgpt/)!${c.reset}`);
+    //    Prioritas: refresh_token (auto-renew, hidup berbulan-bulan) > access_token (10 hari)
+    if (process.env.AUTO_SYNC !== 'false') {
+      let synced = false;
+      if (capturedRefreshToken) {
+        synced = await syncToChatGPT2API(capturedRefreshToken, email, 'refresh');
+        if (synced) {
+          console.log(`    ${c.green}⚡ [chat2api] Refresh token di-upload → auto-renew aktif (hidup berbulan-bulan)!${c.reset}`);
+        }
+      }
+      if (!synced && accessToken && accessToken.startsWith('eyJ')) {
+        synced = await syncToChatGPT2API(accessToken, email, 'access');
+        if (synced) {
+          console.log(`    ${c.yellow}⚡ [chat2api] Access token di-upload (fallback, berlaku 10 hari saja).${c.reset}`);
+        }
       }
     }
 
