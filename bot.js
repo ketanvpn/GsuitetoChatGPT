@@ -104,7 +104,7 @@ function syncTo9Router(accessToken, email) {
       (res) => {
         const setCookies = res.headers['set-cookie'];
         let cookie = '';
-        if (setCookies) cookie = setCookies.map((c) => c.split(';')[0]).join('; ');
+        if (setCookies) cookie = setCookies.map((ck) => ck.split(';')[0]).join('; ');
         res.resume();
         res.on('end', () => {
           if (!cookie) return resolve(false);
@@ -158,8 +158,14 @@ function removeAccountFromList(rawLine) {
   }
 }
 
-async function typeHumanLike(page, element, text) {
-  await element.click({ clickCount: 3 });
+async function typeHumanLike(page, elementOrSelector, text) {
+  let el = elementOrSelector;
+  if (typeof elementOrSelector === 'string') {
+    el = await page.$(elementOrSelector);
+  }
+  if (!el) return;
+
+  await el.click({ clickCount: 3 });
   await page.keyboard.press('Backspace');
   await sleep(150);
 
@@ -170,54 +176,52 @@ async function typeHumanLike(page, element, text) {
   }
 }
 
-async function processAccount(browser, account, index, total) {
+async function processAccount(account, index, total) {
   const { email, password, raw } = account;
   const startTime = Date.now();
   console.log(`\n${c.cyan}[${index + 1}/${total}] 🚀 Memproses: ${c.bright}${email}${c.reset}`);
 
+  // Selalu luncurkan browser baru per akun agar sesi & cookie 100% bersih terisolasi
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+      '--window-size=1280,800',
+    ],
+  });
+
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 800 });
-
-  // Custom User-Agent to mirror a genuine Linux Desktop browser
   await page.setUserAgent(
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
   );
 
   try {
-    console.log(`  ${c.gray}→ Mengakses portal ChatGPT (auth/login)...${c.reset}`);
-    await page.goto('https://chatgpt.com/auth/login', {
+    // 1. Login ke Google Session Terlebih Dahulu (Two-step Rock Solid Auth)
+    console.log(`  ${c.gray}→ Mengautentikasi sesi Google (accounts.google.com)...${c.reset}`);
+    await page.goto('https://accounts.google.com/signin', {
       waitUntil: 'networkidle2',
-      timeout: 30000,
+      timeout: 35000,
     });
+    await sleep(1000);
 
-    // 1. Klik tombol "Continue with Google"
-    console.log(`  ${c.gray}→ Memilih metode 'Continue with Google'...${c.reset}`);
-    const [googleBtn] = await page.$$("xpath/.//button[contains(., 'Continue with Google')]");
-    if (!googleBtn) {
-      throw new Error("Tombol 'Continue with Google' tidak ditemukan pada halaman!");
-    }
-
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-      googleBtn.click(),
-    ]);
-
-    // 2. Google OAuth - Isi Email
+    // Isi Email Google
     console.log(`  ${c.gray}→ Memasukkan email Google...${c.reset}`);
     await page.waitForSelector('#identifierId', { visible: true, timeout: 20000 });
-    await sleep(600);
-
-    const emailInput = await page.$('#identifierId');
-    await typeHumanLike(page, emailInput, email);
-    await sleep(500);
+    await sleep(400);
+    await typeHumanLike(page, '#identifierId', email);
+    await sleep(400);
 
     const nextBtn = await page.$('#identifierNext button, #identifierNext');
     if (nextBtn) await nextBtn.click();
     else await page.keyboard.press('Enter');
 
-    // 3. Google OAuth - Isi Password
+    // Isi Password Google
     console.log(`  ${c.gray}→ Memasukkan password Google...${c.reset}`);
-    await sleep(2000);
+    await sleep(2500);
 
     const pwdSelectors = [
       'input[type="password"][name="Passwd"]',
@@ -235,110 +239,183 @@ async function processAccount(browser, account, index, total) {
     }
 
     if (!pwdField) {
-      throw new Error('Kolom password Google tidak muncul atau akun meminta verifikasi tambahan');
+      throw new Error('Kolom password Google tidak muncul atau akun meminta 2FA/verifikasi SMS');
     }
 
-    await sleep(600);
-    await typeHumanLike(page, pwdField, password);
     await sleep(500);
+    await typeHumanLike(page, pwdField, password);
+    await sleep(400);
 
     const pwdNextBtn = await page.$('#passwordNext button, #passwordNext');
     if (pwdNextBtn) await pwdNextBtn.click();
     else await page.keyboard.press('Enter');
 
-    // 4. Penanganan Layar Onboarding Google Workspace & OpenAI
-    console.log(`  ${c.gray}→ Menunggu otorisasi OAuth & verifikasi profil...${c.reset}`);
-    const consentTimeout = 40000;
-    const consentStart = Date.now();
+    console.log(`  ${c.gray}→ Menunggu konfirmasi login Google...${c.reset}`);
+    await sleep(4000);
 
-    while (Date.now() - consentStart < consentTimeout) {
+    // Handle syarat akun Google baru ("I understand" / "Saya mengerti") jika muncul
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const handled = await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('button, a'));
+          const target = btns.find((b) => {
+            const t = (b.innerText || '').toLowerCase();
+            return (
+              t.includes('i understand') ||
+              t.includes('saya mengerti') ||
+              t.includes('agree') ||
+              t.includes('setuju')
+            );
+          });
+          if (target) {
+            target.click();
+            return true;
+          }
+          return false;
+        });
+        if (handled) {
+          console.log(`  ${c.gray}→ Menyetujui konfirmasi Google Workspace...${c.reset}`);
+          await sleep(3000);
+        }
+      } catch {}
+    }
+
+    // 2. Sekarang Buka Portal Login ChatGPT
+    console.log(`  ${c.gray}→ Mengakses portal ChatGPT (chatgpt.com/auth/login)...${c.reset}`);
+    await page.goto('https://chatgpt.com/auth/login', {
+      waitUntil: 'networkidle2',
+      timeout: 35000,
+    });
+    await sleep(1500);
+
+    // Klik "Continue with Google"
+    console.log(`  ${c.gray}→ Memilih metode 'Continue with Google'...${c.reset}`);
+    let clickedGoogle = false;
+    try {
+      const [googleBtn] = await page.$$("xpath/.//button[contains(., 'Continue with Google')]");
+      if (googleBtn) {
+        await googleBtn.click();
+        clickedGoogle = true;
+      }
+    } catch {}
+
+    if (!clickedGoogle) {
+      // Fallback selector
+      clickedGoogle = await page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+          (b.innerText || '').includes('Continue with Google')
+        );
+        if (btn) {
+          btn.click();
+          return true;
+        }
+        return false;
+      });
+    }
+
+    // 3. Tangani Layar Pemilihan Akun Google / Onboarding OpenAI
+    console.log(`  ${c.gray}→ Menunggu otorisasi SSO & layar onboarding...${c.reset}`);
+    const maxWaitTime = 45000;
+    const waitStart = Date.now();
+
+    while (Date.now() - waitStart < maxWaitTime) {
       await sleep(2000);
       const curUrl = page.url();
 
-      // Cek apakah sudah kembali ke ChatGPT utama
-      if (curUrl.includes('chatgpt.com') && !curUrl.includes('/auth/')) {
-        break;
-      }
-
-      // Deteksi layar "How old are you?" (auth.openai.com/about-you)
-      if (curUrl.includes('about-you')) {
-        console.log(`  ${c.yellow}→ Layar onboarding OpenAI terdeteksi: Mengisi data umur...${c.reset}`);
+      // Kasus A: Jika muncul layar Account Chooser Google
+      if (curUrl.includes('accounts.google.com')) {
         try {
-          const ageSelector =
-            'input[name="age"], input[type="number"], input[placeholder*="Age"], input[id*="age"]';
-          const ageEl = await page.waitForSelector(ageSelector, { timeout: 6000 });
-          if (ageEl) {
-            // Berikan umur realistis acak (24 - 31 tahun)
-            const randomAge = String(24 + Math.floor(Math.random() * 8));
-            await typeHumanLike(page, ageEl, randomAge);
-            await sleep(500);
-
-            const [continueBtn] = await page.$$("xpath/.//button[contains(., 'Continue')]");
-            if (continueBtn) {
-              await Promise.all([
-                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {}),
-                continueBtn.click(),
-              ]);
+          const accSelector = `[data-identifier="${email}"], [data-email="${email}"]`;
+          let accEl = await page.$(accSelector);
+          if (accEl) {
+            console.log(`  ${c.gray}→ Mengklik profil Google: ${email}...${c.reset}`);
+            await accEl.click();
+            await sleep(2000);
+          } else {
+            const clicked = await page.evaluate((targetEmail) => {
+              const elements = Array.from(document.querySelectorAll('div, li, button, [role="link"]'));
+              const target = elements.find((el) => (el.innerText || '').includes(targetEmail));
+              if (target) {
+                const clickable =
+                  target.closest('[data-identifier], [data-email], [role="link"], li, button') || target;
+                clickable.click();
+                return true;
+              }
+              const firstAcc = document.querySelector('[data-identifier], [data-email], div[role="link"]');
+              if (firstAcc) {
+                firstAcc.click();
+                return true;
+              }
+              return false;
+            }, email);
+            if (clicked) {
+              console.log(`  ${c.gray}→ Mengklik profil akun di Google Chooser...${c.reset}`);
+              await sleep(2000);
             }
           }
-        } catch (e) {
-          // ignore transient DOM errors
-        }
+
+          const approveBtn = await page.$(
+            '#submit_approve_access, button::-p-text(Lanjutkan), button::-p-text(Izinkan), button::-p-text(Continue), button::-p-text(Allow)'
+          );
+          if (approveBtn) {
+            console.log(`  ${c.gray}→ Mengonfirmasi persetujuan akses Google OAuth...${c.reset}`);
+            await approveBtn.click();
+            await sleep(3000);
+          }
+        } catch (e) {}
       }
 
-      // Klik tombol consent / persetujuan otomatis (Google & OpenAI)
+      // Kasus B: Deteksi form umur OpenAI ("How old are you?" / auth.openai.com/about-you)
+      if (curUrl.includes('/about-you') || (await page.$('input[placeholder="DD"], input[type="tel"], input#age'))) {
+        console.log(`  ${c.yellow}→ Mendeteksi form usia OpenAI, mengisi tanggal lahir otomatis...${c.reset}`);
+        try {
+          const ageInput = await page.$('input[type="tel"], input[placeholder="Age"], input#age, input[name="age"]');
+          if (ageInput) {
+            const randomAge = String(Math.floor(Math.random() * 8) + 24);
+            await typeHumanLike(page, ageInput, randomAge);
+            await sleep(500);
+          }
+
+          // Klik Continue
+          await page.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll('button'));
+            const cBtn = btns.find((b) => (b.innerText || '').trim().toLowerCase() === 'continue');
+            if (cBtn) cBtn.click();
+          });
+        } catch {}
+      }
+
+      // Kasus C: Klik tombol modal "Continue" atau "You're all set"
       try {
         await page.evaluate(() => {
-          const buttons = Array.from(
-            document.querySelectorAll('button, [role="button"], input[type="submit"]')
-          );
-          const keywords = [
-            'i understand',
-            'saya mengerti',
-            'continue',
-            'lanjutkan',
-            'allow',
-            'izinkan',
-            'next',
-            'agree',
-            'setuju',
-          ];
-          for (const btn of buttons) {
-            const text = (btn.innerText || btn.value || '').trim().toLowerCase();
-            for (const kw of keywords) {
-              if (text === kw || text.includes(kw)) {
-                if (btn.offsetParent !== null) {
-                  btn.click();
-                  return;
-                }
-              }
-            }
-          }
+          const btns = Array.from(document.querySelectorAll('button'));
+          const btn = btns.find((b) => {
+            const txt = (b.innerText || '').trim().toLowerCase();
+            return (
+              txt === 'continue' ||
+              txt.includes("you're all set") ||
+              txt === 'stay logged in' ||
+              txt === 'tetap masuk' ||
+              txt === 'lanjutkan'
+            );
+          });
+          if (btn && btn.offsetParent !== null) btn.click();
         });
-      } catch (e) {}
+      } catch {}
+
+      // Cek apakah sudah mendarat di dashboard utama ChatGPT
+      if (curUrl.includes('chatgpt.com') && !curUrl.includes('/auth/')) {
+        console.log(`  ${c.green}✓ Berhasil mendarat di dashboard ChatGPT!${c.reset}`);
+        break;
+      }
     }
 
-    // 5. Tunggu inisialisasi sesi ChatGPT
     await sleep(3500);
 
-    // Klik tombol "Continue" jika ada modal "You're all set"
-    try {
-      await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button'));
-        const continueBtn = btns.find((b) => (b.innerText || '').trim().toLowerCase() === 'continue');
-        if (continueBtn && continueBtn.offsetParent !== null) {
-          continueBtn.click();
-        }
-      });
-    } catch (e) {}
-
-    await sleep(2000);
-
-    // 6. Ekstraksi Token Sesi & Kredensial
+    // 4. Ekstraksi Token Sesi & Kredensial
     console.log(`  ${c.gray}→ Mengekstrak token sesi & cookie otentikasi...${c.reset}`);
     const cookies = await page.cookies();
 
-    // Ambil session-token (baik format tunggal maupun split .0)
     const sessionTokenParts = cookies
       .filter((ck) => ck.name.startsWith('__Secure-next-auth.session-token'))
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -365,12 +442,10 @@ async function processAccount(browser, account, index, total) {
     const expires = sessionData.expires || 'N/A';
     const userName = (sessionData.user && sessionData.user.name) || 'User';
 
-    // 7. Simpan Token
-    // Simpan ke ringkasan chatgpt_tokens.txt
+    // 5. Simpan Token
     const tokenRecord = `${email}|${accessToken}|${sessionTokenParts}|${expires}\n`;
     fs.appendFileSync(TOKENS_FILE, tokenRecord, 'utf-8');
 
-    // Simpan detail terstruktur ke tokens/{email}.json
     const jsonPath = path.join(TOKENS_DIR, `${email.replace(/[@.]/g, '_')}.json`);
     const fullData = {
       email,
@@ -384,10 +459,10 @@ async function processAccount(browser, account, index, total) {
     };
     fs.writeFileSync(jsonPath, JSON.stringify(fullData, null, 2), 'utf-8');
 
-    // 8. Bersihkan akun dari akun.txt (Idempotent)
+    // 6. Bersihkan akun dari akun.txt (Idempotent)
     removeAccountFromList(raw);
 
-    // 9. Auto-sync ke 9Router (jika aktif)
+    // 7. Auto-sync ke 9Router
     if (process.env.AUTO_SYNC !== 'false' && accessToken && accessToken.startsWith('eyJ')) {
       const synced = await syncTo9Router(accessToken, email);
       if (synced) {
@@ -403,7 +478,6 @@ async function processAccount(browser, account, index, total) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.error(`  ${c.red}✗ GAGAL! [${elapsed}s] ${error.message}${c.reset}`);
 
-    // Tangkap screenshot error untuk kemudahan investigasi
     try {
       const sanitized = email.replace(/[@.]/g, '_');
       const ssPath = path.join(SCREENSHOTS_DIR, `error-${sanitized}-${Date.now()}.png`);
@@ -413,7 +487,12 @@ async function processAccount(browser, account, index, total) {
 
     return false;
   } finally {
-    await page.close();
+    try {
+      await page.close();
+    } catch (e) {}
+    try {
+      await browser.close();
+    } catch (e) {}
   }
 }
 
@@ -429,37 +508,23 @@ async function main() {
   }
 
   console.log(`${c.cyan}[i] Ditemukan ${c.bright}${total}${c.reset}${c.cyan} akun di akun.txt.${c.reset}`);
-  console.log(`${c.gray}[i] Memulai automasi browser headless (Stealth Mode)...${c.reset}\n`);
-
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-blink-features=AutomationControlled',
-      '--window-size=1280,800',
-    ],
-  });
+  console.log(`${c.gray}[i] Memulai automasi browser per akun (Stealth Mode)...${c.reset}\n`);
 
   let successCount = 0;
   let failCount = 0;
   const overallStart = Date.now();
 
   for (let i = 0; i < total; i++) {
-    const ok = await processAccount(browser, accounts[i], i, total);
+    const ok = await processAccount(accounts[i], i, total);
     if (ok) successCount++;
     else failCount++;
 
-    // Jeda alami antar akun (3-5 detik)
     if (i < total - 1) {
       const pause = Math.floor(Math.random() * 2000) + 3000;
       console.log(`  ${c.gray}Jeda alami ${pause / 1000}s sebelum akun berikutnya...${c.reset}`);
       await sleep(pause);
     }
   }
-
-  await browser.close();
 
   const totalTime = ((Date.now() - overallStart) / 1000).toFixed(1);
   console.log(`\n${c.cyan}════════════════════════════════════════════════════════════════════${c.reset}`);
