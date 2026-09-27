@@ -87,16 +87,23 @@ Mendaftar akun ChatGPT baru dari VPS Linux menggunakan email biasa hampir selalu
 
 ```text
 GsuitetoChatGPT/
-├── bot.js             # Mesin utama otomasi browser Puppeteer & ekstraksi token
-├── sync-9router.js    # Skrip sinkronisasi akun hasil panen ke database 9Router
-├── run.sh             # Skrip peluncur cepat (runner)
-├── setup.sh           # Installer dependensi sistem Linux & Chromium
-├── akun.example.txt   # Contoh format daftar akun input
-├── akun.txt           # File input akun Anda (diabaikan oleh git)
-├── chatgpt_tokens.txt # Ringkasan token hasil panen (diabaikan oleh git)
-├── tokens/            # Folder berkas JSON detail tiap akun (diabaikan oleh git)
-├── package.json       # Metadata & dependensi Node.js
-└── README.md          # Dokumentasi panduan penggunaan
+├── bot.js                   # Mesin utama otomasi browser Puppeteer & ekstraksi token
+├── sync-9router.js          # Sinkronisasi token ke 9Router (Provider Codex cx)
+├── sync-chatgpt2api.js      # Sinkronisasi token ke chat2api bridge
+├── run.sh                   # Skrip peluncur cepat (runner)
+├── setup.sh                 # Installer dependensi sistem Linux & Chromium
+├── docker-compose.yml       # Docker Compose: chat2api + Cloudflare WARP sidecar
+├── config.example.yaml      # Template konfigurasi (salin ke config.yaml)
+├── akun.example.txt         # Contoh format daftar akun input
+├── akun.txt                 # File input akun Anda (diabaikan oleh git)
+├── chatgpt_tokens.txt       # Ringkasan token hasil panen (diabaikan oleh git)
+├── tokens/                  # Folder berkas JSON detail tiap akun (diabaikan oleh git)
+├── bridge/                  # File tambahan untuk chat2api bridge
+│   ├── custom_models.py     # Endpoint /v1/models (11 model, sesuai 9Router Codex)
+│   ├── patch_models.py      # Patch ChatService.py agar support model GPT-5.x/6
+│   └── start.sh             # Startup script (auto-patch saat container start)
+├── package.json             # Metadata & dependensi Node.js
+└── README.md                # Dokumentasi panduan penggunaan
 ```
 
 ---
@@ -161,10 +168,23 @@ Jika Anda ingin membuka ChatGPT Web di komputer/laptop pribadi menggunakan akun 
    - Centang **Secure** dan **HttpOnly**.
 5. Refresh browser — Anda langsung berada di dalam dashboard akun ChatGPT tersebut!
 
-### 3. Menghubungkan ke Gateway Web-to-API (Aurora / chatgpt2api)
-Jika ingin memutar puluhan token sesi web menjadi endpoint OpenAI-compatible standar (`/v1/chat/completions`):
-- Anda dapat menyalurkan `sessionToken` ke adapter container Docker (seperti Aurora / chatgpt2api).
-- *Catatan:* Untuk trafik intensif web conversation dari IP datacenter VPS, disarankan menggunakan Residential Proxy pada adapter agar terhindar dari deteksi *"Unusual activity"*.
+### 3. Menghubungkan ke chat2api Bridge (Web-to-API)
+Token sesi web diubah menjadi endpoint OpenAI-compatible (`/v1/chat/completions`) melalui **chat2api** bridge:
+```bash
+npm run sync:chat2api
+```
+Bridge ini mendukung **11 model** yang selaras dengan 9Router Codex:
+- **GPT-6:** Astra, Sol, Luna
+- **GPT-5.6:** Sol, Terra, Luna
+- **GPT-5.5**, **GPT-5.4**, **GPT-5.4 Mini**
+- **GPT-5.3 Codex Spark**, **Auto**
+
+Setup bridge via Docker:
+```bash
+cp config.example.yaml config.yaml   # Edit sesuai kebutuhan
+docker compose up -d                  # Jalankan chat2api + WARP proxy
+```
+> ⚠️ **WARP Proxy wajib** — IP datacenter VPS diblokir oleh `chatgpt.com/backend-api`. Bridge menggunakan Cloudflare WARP sidecar untuk merutekan trafik melalui IP residensial.
 
 ---
 
@@ -176,7 +196,7 @@ Anda dapat mengonfigurasi variabel berikut (atau membuat berkas `.env`):
 | :--- | :--- | :--- |
 | `ROUTER_HOST` | `127.0.0.1` | Host instance 9Router |
 | `ROUTER_PORT` | `20128` | Port instance 9Router |
-| `ROUTER_PASSWORD` | `maduTJ150` | Password admin 9Router untuk injeksi API |
+| `ROUTER_PASSWORD` | *(wajib diisi)* | Password admin 9Router untuk injeksi API |
 | `AUTO_SYNC` | `true` | Otomatis mendaftarkan akun ke 9Router saat panen |
 
 ---
