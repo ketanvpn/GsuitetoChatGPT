@@ -9,3 +9,8 @@ node_modules/
 .DS_Store
 warpdata/
 bridge/data/
+
+# Backup files
+*.bak
+akun.txt.full
+akun_test.txt
