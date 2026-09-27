@@ -1,0 +1,5 @@
+# Masukkan akun Google / GSuite Anda di bawah ini
+# Format bisa menggunakan pemisah pipa (|) atau titik dua (:)
+# Contoh:
+# user1@domainanda.com|PasswordKuat123
+# user2@domainanda.com:PasswordKuat456

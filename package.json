@@ -1,0 +1,26 @@
+{
+  "name": "gsuite-to-chatgpt",
+  "version": "1.0.0",
+  "description": "Automated Google Workspace (GSuite) to ChatGPT / OpenAI Account Harvester & Token Bridge",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "keywords": [
+    "chatgpt",
+    "openai",
+    "gsuite",
+    "google-sso",
+    "automation",
+    "puppeteer",
+    "9router",
+    "token-harvester"
+  ],
+  "author": "KetanTech",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^24.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

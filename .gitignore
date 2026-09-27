@@ -1,0 +1,9 @@
+akun.txt
+chatgpt_tokens.txt
+tokens/
+screenshots/
+*.log
+node_modules
+node_modules/
+.env
+.DS_Store
