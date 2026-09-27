@@ -16,6 +16,8 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
 puppeteer.use(StealthPlugin());
 
+const { execSync } = require('child_process');
+
 // --- Paths Configuration ---
 const ACCOUNTS_FILE = path.join(__dirname, 'akun.txt');
 const TOKENS_FILE = path.join(__dirname, 'chatgpt_tokens.txt');
@@ -124,6 +126,28 @@ function syncToChatGPT2API(token, email, tokenType = 'access') {
   });
 }
 
+// --- WARP Proxy & IP Rotation ---
+const WARP_SOCKS = process.env.WARP_SOCKS || 'socks5://172.21.0.2:1080';
+const WARP_CONTAINER = process.env.WARP_CONTAINER || 'chatgpt-warp';
+const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '5');  // Rotasi IP setiap N akun
+const COOLDOWN_SEC = parseInt(process.env.COOLDOWN_SEC || '60'); // Jeda antar akun (detik)
+
+function reconnectWarp() {
+  try {
+    console.log(`  ${c.magenta}🔄 Reconnect WARP — rotasi IP...${c.reset}`);
+    execSync(`docker exec ${WARP_CONTAINER} warp-cli disconnect`, { timeout: 10000, stdio: 'ignore' });
+    execSync('sleep 3');
+    execSync(`docker exec ${WARP_CONTAINER} warp-cli connect`, { timeout: 10000, stdio: 'ignore' });
+    execSync('sleep 6');
+    try {
+      const newIp = execSync(`docker exec ${WARP_CONTAINER} curl -s --max-time 8 https://ifconfig.me`, { timeout: 15000 }).toString().trim();
+      console.log(`  ${c.magenta}🌐 IP baru: ${newIp}${c.reset}`);
+    } catch { console.log(`  ${c.gray}(IP check timeout — melanjutkan)${c.reset}`); }
+  } catch (e) {
+    console.log(`  ${c.yellow}⚠ WARP reconnect gagal: ${e.message}${c.reset}`);
+  }
+}
+
 function removeAccountFromList(rawLine) {
   try {
     if (!fs.existsSync(ACCOUNTS_FILE)) return;
@@ -171,6 +195,7 @@ async function processAccount(account, index, total) {
       '--window-size=1280,800',
       '--disable-features=IsolateOrigins,site-per-process',
       '--display=' + (process.env.DISPLAY || ':99'),
+      `--proxy-server=${WARP_SOCKS}`,
     ],
   });
 
@@ -415,6 +440,11 @@ async function processAccount(account, index, total) {
       let curUrl = '';
       try { curUrl = page.url(); } catch { continue; }
 
+      // Debug: log current URL for troubleshooting
+      if (process.env.DEBUG_SSO) {
+        console.log(`    ${c.gray}[debug] URL: ${curUrl.substring(0, 80)}${c.reset}`);
+      }
+
       // Kasus CF: Cloudflare Turnstile di auth0.openai.com atau chatgpt.com
       try {
         const isTurnstile = await page.evaluate(() => {
@@ -441,6 +471,16 @@ async function processAccount(account, index, total) {
         // "Execution context destroyed" — page is navigating, which is good
         await sleep(2000);
         continue;
+      }
+
+      // Kasus AUTH ERROR: Akun OpenAI dihapus/dinonaktifkan
+      if (curUrl.includes('auth.openai.com/error') || curUrl.includes('auth0.openai.com/error')) {
+        let errorMsg = '';
+        try { errorMsg = await page.evaluate(() => document.body.innerText.substring(0, 300)); } catch {}
+        if (errorMsg.includes('deleted or deactivated') || errorMsg.includes('Authentication Error')) {
+          throw new Error(`Akun OpenAI dinonaktifkan/dihapus oleh OpenAI — "${email}" perlu didaftarkan ulang`);
+        }
+        throw new Error(`Auth error OpenAI: ${errorMsg.substring(0, 100)}`);
       }
 
       // Kasus A: Jika muncul layar Account Chooser Google
@@ -642,20 +682,32 @@ async function main() {
   }
 
   console.log(`${c.cyan}[i] Ditemukan ${c.bright}${total}${c.reset}${c.cyan} akun di akun.txt.${c.reset}`);
-  console.log(`${c.gray}[i] Memulai automasi browser per akun (Stealth Mode)...${c.reset}\n`);
+  console.log(`${c.gray}[i] Memulai automasi browser per akun (Stealth Mode)...${c.reset}`);
+  console.log(`${c.gray}[i] WARP Proxy: ${WARP_SOCKS} | Batch: ${BATCH_SIZE} akun/IP | Cooldown: ${COOLDOWN_SEC}s${c.reset}\n`);
+
+  // Reconnect WARP untuk IP fresh sebelum mulai
+  reconnectWarp();
 
   let successCount = 0;
   let failCount = 0;
   const overallStart = Date.now();
 
   for (let i = 0; i < total; i++) {
+    // Rotasi IP setiap BATCH_SIZE akun (kecuali batch pertama)
+    if (i > 0 && i % BATCH_SIZE === 0) {
+      console.log(`\n${c.magenta}═══ Rotasi IP (batch ${Math.floor(i / BATCH_SIZE) + 1}) — ${i}/${total} selesai ═══${c.reset}`);
+      reconnectWarp();
+    }
+
     const ok = await processAccount(accounts[i], i, total);
     if (ok) successCount++;
     else failCount++;
 
     if (i < total - 1) {
-      const pause = Math.floor(Math.random() * 2000) + 3000;
-      console.log(`  ${c.gray}Jeda alami ${pause / 1000}s sebelum akun berikutnya...${c.reset}`);
+      // Jeda panjang antar akun untuk hindari rate-limit Cloudflare
+      const jitter = Math.floor(Math.random() * 20000); // 0-20s random
+      const pause = (COOLDOWN_SEC * 1000) + jitter;
+      console.log(`  ${c.gray}⏳ Cooldown ${(pause / 1000).toFixed(0)}s sebelum akun berikutnya...${c.reset}`);
       await sleep(pause);
     }
   }
