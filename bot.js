@@ -91,7 +91,7 @@ function syncToChatGPT2API(token, email, tokenType = 'access') {
   return new Promise((resolve) => {
     const chat2apiHost = process.env.CHAT2API_HOST || '127.0.0.1';
     const chat2apiPort = process.env.CHAT2API_PORT || 8085;
-    const chat2apiAuth = process.env.CHAT2API_AUTH || '«redacted:sk-…»';
+    const chat2apiAuth = process.env.CHAT2API_AUTH || 'sk-cha...etan';
     const postData = `text=${encodeURIComponent(token)}`;
     const req = http.request(
       {
@@ -160,22 +160,32 @@ async function processAccount(account, index, total) {
   console.log(`\n${c.cyan}[${index + 1}/${total}] 🚀 Memproses: ${c.bright}${email}${c.reset}`);
 
   // Selalu luncurkan browser baru per akun agar sesi & cookie 100% bersih terisolasi
+  // Gunakan headed mode (non-headless) via Xvfb untuk bypass Cloudflare detection
   const browser = await puppeteer.launch({
-    headless: 'new',
+    headless: false,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
       '--window-size=1280,800',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--display=' + (process.env.DISPLAY || ':99'),
     ],
   });
 
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 800 });
   await page.setUserAgent(
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
   );
+
+  // Extra anti-detection: override webdriver flag
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    // Remove Puppeteer-specific properties
+    delete navigator.__proto__.webdriver;
+  });
 
   // --- Intercept OAuth responses to capture refresh_token ---
   let capturedRefreshToken = null;
@@ -215,6 +225,30 @@ async function processAccount(account, index, total) {
     if (nextBtn) await nextBtn.click();
     else await page.keyboard.press('Enter');
 
+    // Tunggu halaman pindah ke form password
+    await sleep(3000);
+
+    // Cek apakah Google menampilkan error / captcha / challenge
+    const emailPageState = await page.evaluate(() => {
+      const bodyText = (document.body.innerText || '').toLowerCase();
+      if (bodyText.includes('couldn\'t find your google account') || bodyText.includes('akun google anda tidak ditemukan')) return 'email_invalid';
+      if (bodyText.includes('try again') || bodyText.includes('coba lagi')) return 'try_again';
+      if (bodyText.includes('verify it\'s you') || bodyText.includes('verifikasi')) return 'verify';
+      if (document.querySelector('#captchaimg, iframe[src*="recaptcha"]')) return 'captcha';
+      if (document.querySelector('#identifierId')) return 'still_on_email';
+      return 'ok';
+    });
+
+    if (emailPageState !== 'ok') {
+      console.log(`  ${c.yellow}⚠ Google login status: ${emailPageState}${c.reset}`);
+      if (emailPageState === 'still_on_email') {
+        // Email didn't advance — click next again
+        const retryNext = await page.$('#identifierNext button, #identifierNext');
+        if (retryNext) await retryNext.click();
+        await sleep(3000);
+      }
+    }
+
     // Isi Password Google
     console.log(`  ${c.gray}→ Memasukkan password Google...${c.reset}`);
     await sleep(2500);
@@ -229,7 +263,7 @@ async function processAccount(account, index, total) {
     let pwdField = null;
     for (const sel of pwdSelectors) {
       try {
-        pwdField = await page.waitForSelector(sel, { visible: true, timeout: 8000 });
+        pwdField = await page.waitForSelector(sel, { visible: true, timeout: 15000 });
         if (pwdField) break;
       } catch {}
     }
@@ -279,10 +313,72 @@ async function processAccount(account, index, total) {
     // 2. Sekarang Buka Portal Login ChatGPT
     console.log(`  ${c.gray}→ Mengakses portal ChatGPT (chatgpt.com/auth/login)...${c.reset}`);
     await page.goto('https://chatgpt.com/auth/login', {
-      waitUntil: 'networkidle2',
-      timeout: 35000,
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
     });
-    await sleep(1500);
+    await sleep(3000);
+
+    // 2a. Handle Cloudflare Turnstile Challenge (up to 30s with retry clicks)
+    for (let cfAttempt = 1; cfAttempt <= 6; cfAttempt++) {
+      let hasTurnstile = false;
+      try {
+        hasTurnstile = await page.evaluate(() => {
+          return !!(
+            document.querySelector('iframe[src*="challenges.cloudflare.com"]') ||
+            document.querySelector('.cf-turnstile') ||
+            document.querySelector('#cf-turnstile') ||
+            (document.body.innerText || '').includes('Verify you are human')
+          );
+        });
+      } catch {
+        // Page navigated — Turnstile likely auto-resolved
+        break;
+      }
+
+      if (!hasTurnstile) {
+        if (cfAttempt > 1) console.log(`  ${c.green}✓ Cloudflare Turnstile berhasil dilewati!${c.reset}`);
+        break;
+      }
+
+      if (cfAttempt === 1) {
+        console.log(`  ${c.yellow}⚡ Cloudflare Turnstile terdeteksi — menunggu & mencoba klik...${c.reset}`);
+      }
+
+      // Try clicking the Turnstile checkbox
+      try {
+        const frames = page.frames();
+        const turnstileFrame = frames.find(f => f.url().includes('challenges.cloudflare.com'));
+        if (turnstileFrame) {
+          const iframeEl = await page.$('iframe[src*="challenges.cloudflare.com"]');
+          if (iframeEl) {
+            const box = await iframeEl.boundingBox();
+            if (box) {
+              // Click the checkbox area (left side of the iframe)
+              await page.mouse.click(box.x + 25, box.y + box.height / 2);
+              console.log(`  ${c.gray}→ Turnstile checkbox diklik (attempt ${cfAttempt})...${c.reset}`);
+            }
+          }
+        }
+      } catch {}
+
+      await sleep(5000);
+
+      if (cfAttempt === 6) {
+        console.log(`  ${c.yellow}⚠ Turnstile belum terpecahkan setelah 30s — melanjutkan...${c.reset}`);
+        // Take debug screenshot
+        try { await page.screenshot({ path: path.join(SCREENSHOTS_DIR, `turnstile-blocked-${email.replace(/[@.]/g,'_')}.png`) }); } catch {}
+      }
+    }
+
+    // After Turnstile, check if we need to wait for page reload
+    await sleep(2000);
+    try {
+      const curUrl = page.url();
+      if (!curUrl.includes('chatgpt.com') && !curUrl.includes('auth0.openai.com')) {
+        await page.goto('https://chatgpt.com/auth/login', { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await sleep(2000);
+      }
+    } catch {}
 
     // Klik "Continue with Google"
     console.log(`  ${c.gray}→ Memilih metode 'Continue with Google'...${c.reset}`);
@@ -311,12 +407,41 @@ async function processAccount(account, index, total) {
 
     // 3. Tangani Layar Pemilihan Akun Google / Onboarding OpenAI
     console.log(`  ${c.gray}→ Menunggu otorisasi SSO & layar onboarding...${c.reset}`);
-    const maxWaitTime = 45000;
+    const maxWaitTime = 60000;
     const waitStart = Date.now();
 
     while (Date.now() - waitStart < maxWaitTime) {
       await sleep(2000);
-      const curUrl = page.url();
+      let curUrl = '';
+      try { curUrl = page.url(); } catch { continue; }
+
+      // Kasus CF: Cloudflare Turnstile di auth0.openai.com atau chatgpt.com
+      try {
+        const isTurnstile = await page.evaluate(() => {
+          return !!(
+            document.querySelector('iframe[src*="challenges.cloudflare.com"]') ||
+            (document.body.innerText || '').includes('Verify you are human')
+          );
+        });
+        if (isTurnstile) {
+          console.log(`  ${c.yellow}⚡ Cloudflare Turnstile muncul di SSO flow — mencoba klik...${c.reset}`);
+          try {
+            const iframeEl = await page.$('iframe[src*="challenges.cloudflare.com"]');
+            if (iframeEl) {
+              const box = await iframeEl.boundingBox();
+              if (box) {
+                await page.mouse.click(box.x + 25, box.y + box.height / 2);
+              }
+            }
+          } catch {}
+          await sleep(5000);
+          continue;
+        }
+      } catch {
+        // "Execution context destroyed" — page is navigating, which is good
+        await sleep(2000);
+        continue;
+      }
 
       // Kasus A: Jika muncul layar Account Chooser Google
       if (curUrl.includes('accounts.google.com')) {
@@ -362,7 +487,9 @@ async function processAccount(account, index, total) {
       }
 
       // Kasus B: Deteksi form umur OpenAI ("How old are you?" / auth.openai.com/about-you)
-      if (curUrl.includes('/about-you') || (await page.$('input[placeholder="DD"], input[type="tel"], input#age'))) {
+      let isAboutYou = curUrl.includes('/about-you');
+      if (!isAboutYou) { try { isAboutYou = !!(await page.$('input[placeholder="DD"], input[type="tel"], input#age')); } catch {} }
+      if (isAboutYou) {
         console.log(`  ${c.yellow}→ Mendeteksi form usia OpenAI, mengisi tanggal lahir otomatis...${c.reset}`);
         try {
           const ageInput = await page.$('input[type="tel"], input[placeholder="Age"], input#age, input[name="age"]');
