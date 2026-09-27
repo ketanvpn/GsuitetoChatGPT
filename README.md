@@ -80,6 +80,7 @@ Mendaftar akun ChatGPT baru dari VPS Linux menggunakan email biasa hampir selalu
 - 🎂 **Penanganan Form Onboarding OpenAI:** Otomatis mendeteksi formulir umur di `auth.openai.com/about-you` dan mengisikan usia realistis secara acak.
 - 🧹 **Pembersihan Otomatis `akun.txt` (Idempotent):** Akun yang berhasil diproses langsung dihapus dari `akun.txt` secara real-time. Jika proses terhenti di tengah jalan, Anda dapat melanjutkannya tanpa memproses ulang akun yang sudah sukses.
 - 📸 **Auto Screenshot Error Logging:** Jika terjadi kendala pada salah satu akun, tangkapan layar otomatis disimpan ke folder `screenshots/` untuk kemudahan investigasi tanpa menghentikan akun berikutnya.
+- 🔑 **Refresh Token Auto-Renew:** Bot menyadap `refresh_token` dari OAuth flow (`auth0.openai.com/oauth/token`) saat proses login. Refresh token ini di-upload ke chat2api, yang akan **otomatis memperbarui access token setiap 5 hari** tanpa perlu login ulang — token hidup selama akun tidak di-revoke.
 
 ---
 
@@ -173,6 +174,9 @@ Token sesi web diubah menjadi endpoint OpenAI-compatible (`/v1/chat/completions`
 ```bash
 npm run sync:chat2api
 ```
+
+**🔑 Refresh Token (Direkomendasikan):** Bot otomatis menyadap `refresh_token` saat proses login. Token ini di-upload ke chat2api dan akan **auto-renew setiap 5 hari** — tidak perlu harvest ulang selama akun hidup. Jika refresh token tidak tersedia, bot fallback ke access token (berlaku 10 hari).
+
 Bridge ini mendukung **11 model** yang selaras dengan 9Router Codex:
 - **GPT-6:** Astra, Sol, Luna
 - **GPT-5.6:** Sol, Terra, Luna
@@ -198,6 +202,23 @@ Anda dapat mengonfigurasi variabel berikut (atau membuat berkas `.env`):
 | `ROUTER_PORT` | `20128` | Port instance 9Router |
 | `ROUTER_PASSWORD` | *(wajib diisi)* | Password admin 9Router untuk injeksi API |
 | `AUTO_SYNC` | `true` | Otomatis mendaftarkan akun ke 9Router saat panen |
+| `CHAT2API_HOST` | `127.0.0.1` | Host instance chat2api bridge |
+| `CHAT2API_PORT` | `8085` | Port instance chat2api bridge |
+| `CHAT2API_AUTH` | *(wajib diisi)* | API key chat2api (env `AUTHORIZATION` di chat2api) |
+
+---
+
+## 🔑 Tentang Token & Masa Berlaku
+
+Bot mengekstrak **3 jenis token** dari setiap akun:
+
+| Token | Masa Berlaku | Auto-Renew | Kegunaan |
+| :--- | :--- | :--- | :--- |
+| **Refresh Token** | Sampai di-revoke | ✅ Ya (chat2api) | Upload ke chat2api → auto-renew setiap 5 hari |
+| Access Token (JWT) | 10 hari | ❌ | Fallback jika refresh token gagal |
+| Session Token (Cookie) | ~90 hari | ❌ | Login browser via Cookie-Editor |
+
+**Prioritas upload ke chat2api:** Refresh Token → Access Token (fallback).
 
 ---
 
