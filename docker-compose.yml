@@ -1,0 +1,53 @@
+services:
+  warp:
+    image: caomingjun/warp
+    container_name: chatgpt-warp
+    restart: always
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - WARP_SLEEP=5
+    cap_add:
+      - MKNOD
+      - AUDIT_WRITE
+      - NET_ADMIN
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      - ./warpdata:/var/lib/cloudflare-warp
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "https://www.google.com"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  chat2api:
+    image: lanqian528/chat2api:latest
+    container_name: chatgpt2api
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:8085:5005'
+    environment:
+      - TZ=Asia/Jakarta
+      - AUTHORIZATION=sk-your-secret-key
+      - PROXY_URL=socks5://chatgpt-warp:1080
+      - ENABLE_GATEWAY=True
+      - AUTO_SEED=True
+      - SCHEDULED_REFRESH=True
+      - RANDOM_TOKEN=True
+      - RETRY_TIMES=5
+      - OAI_LANGUAGE=en-US
+    depends_on:
+      warp:
+        condition: service_healthy
+    volumes:
+      - ./bridge/data:/app/data
+      - ./bridge/custom_models.py:/app/api/custom_models.py:ro
+      - ./bridge/start.sh:/app/start.sh:ro
+    command: ["bash", "/app/start.sh"]
+
+networks:
+  default:
+    driver: bridge

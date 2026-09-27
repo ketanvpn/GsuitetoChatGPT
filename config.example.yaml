@@ -1,0 +1,26 @@
+# GsuitetoChatGPT Configuration
+
+# Akun Google Workspace
+# Format: email:password (satu per baris)
+accounts_file: akun.txt
+
+# Chat2API Bridge
+chat2api:
+  url: http://127.0.0.1:8085
+  authorization: sk-your-secret-key
+
+# 9Router Integration (optional, via chat2api bridge)
+9router:
+  url: http://127.0.0.1:20128
+  provider_prefix: chatgpt
+
+# Browser Settings
+browser:
+  headless: true
+  human_typing_delay_ms: 30-75
+  timeout_ms: 60000
+
+# Output
+output:
+  tokens_dir: ./tokens
+  screenshots_dir: ./screenshots
